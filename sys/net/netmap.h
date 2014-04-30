@@ -515,6 +515,23 @@ enum {	NR_REG_DEFAULT	= 0,	/* backward compat, should not be used. */
 	NR_REG_ONE_NIC	= 4,
 	NR_REG_PIPE_MASTER = 5,
 	NR_REG_PIPE_SLAVE = 6,
+
+    /* *
+     * suport range ring id 
+     * So, we split the 12-bits nr_ringid to two parts:
+     * the low 6-bits is start ring id,
+     * and the high 6-bits is end ring id(include).
+     *
+     * Use following macro to set/get start/end ring id,
+     * and build the nr_ringid
+     */
+#define RANGE_RINGID_MASK (0x003F)
+#define LOW_RINGID_MASK  (RANGE_RINGID_MASK)
+#define HIG_RINGID_MASK ( (RANGE_RINGID_MASK) << 6 )
+#define NETMAP_COMPOS_RINGID(start, end) ((( ((end) & RANGE_RINGID_MASK)<< 6) & HIG_RINGID_MASK) | ((start) & LOW_RINGID_MASK)) 
+#define NETMAP_GET_START_RINGID(ringid) ((ringid) & RANGE_RINGID_MASK) 
+#define NETMAP_GET_END_RINGID(ringid) (((ringid) >> 6) & RANGE_RINGID_MASK)
+    NR_REG_RANGE_NIC = 7,
 };
 /* monitor uses the NR_REG to select the rings to monitor */
 #define NR_MONITOR_TX	0x100
