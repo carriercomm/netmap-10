@@ -1498,6 +1498,27 @@ netmap_set_ringid(struct netmap_priv_d *priv, uint16_t ringid, uint32_t flags)
 		priv->np_rxqfirst = j;
 		priv->np_rxqlast = j + 1;
 		break;
+    case NR_REG_RANGE_NIC:
+        {
+            unsigned short start = NETMAP_GET_START_RINGID(i);
+            unsigned short end   = NETMAP_GET_END_RINGID(i);
+
+            if (start >= na->num_tx_rings 
+                    || start >= na->num_rx_rings 
+                    || end >= na->num_tx_rings 
+                    || end >= na->num_rx_rings)
+            {
+                D("invalid range ring id: (%d,%d)", start, end);
+                return EINVAL;
+            }
+
+            priv->np_txqfirst = start;
+            priv->np_txqlast = end + 1;
+
+            priv->np_rxqfirst = start;
+            priv->np_rxqlast = end + 1;
+        }
+        break;
 	default:
 		D("invalid regif type %d", reg);
 		return EINVAL;

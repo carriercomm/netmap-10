@@ -2,12 +2,13 @@
 # we can just define 'progs' and create custom targets.
 PROGS	=	pkt-gen bridge vale-ctl
 #PROGS += pingd
-PROGS	+= testlock test_select testmmap vale-ctl
+PROGS	+= testlock test_select testmmap vale-ctl testrangenic
 LIBNETMAP =
 
 CLEANFILES = $(PROGS) *.o
 NO_MAN=
-CFLAGS = -O2 -pipe
+#CFLAGS = -O2 -pipe
+CFLAGS = -g -pipe
 CFLAGS += -Werror -Wall -Wunused-function
 CFLAGS += -I ../sys # -I/home/luigi/FreeBSD/head/sys -I../sys
 CFLAGS += -Wextra
@@ -33,6 +34,8 @@ pkt-gen: pkt-gen.o
 bridge: bridge.o
 
 vale-ctl: vale-ctl.o
+
+testrangenic: testrangenic.o
 
 %-pic.o: %.c
 	$(CC) $(CFLAGS) -fpic -c $^ -o $@

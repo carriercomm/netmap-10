@@ -361,7 +361,7 @@ nm_open(const char *ifname, const struct nmreq *req,
 	if (ifname[0] == 'n')
 		ifname += 7;
 	/* scan for a separator */
-	for (port = ifname; *port && !index("-*^{}", *port); port++)
+	for (port = ifname; *port && !index("-*^{}+", *port); port++)
 		;
 	namelen = port - ifname;
 	if (namelen >= sizeof(d->req.nr_name)) {
@@ -376,6 +376,20 @@ nm_open(const char *ifname, const struct nmreq *req,
 		nr_flags = NR_REG_ONE_NIC;
 		nr_ringid = atoi(port + 1);
 		break;
+    case '+': /* range NIC */
+        nr_flags = NR_REG_RANGE_NIC;
+        {
+            const char *sp = strchr(port + 1, '.');
+            if (NULL == sp) {
+			    errmsg = "invalid port for range nic";
+			    goto fail;
+            }
+            unsigned short start = atoi(port + 1);
+            unsigned short end = atoi(sp + 1);
+
+            nr_ringid = NETMAP_COMPOS_RINGID(start, end);
+        }
+        break;
 	case '*': /* NIC and SW, ignore port */
 		nr_flags = NR_REG_NIC_SW;
 		if (port[1]) {
@@ -508,7 +522,12 @@ nm_open(const char *ifname, const struct nmreq *req,
 	} else if (nr_flags == NR_REG_ONE_NIC) {
 		/* XXX check validity */
 		d->first_tx_ring = d->last_tx_ring =
-		d->first_rx_ring = d->last_rx_ring = nr_ringid;
+		d->first_rx_ring = d->last_rx_ring = (nr_ringid & NETMAP_RING_MASK);
+    } else if (nr_flags == NR_REG_RANGE_NIC) { /* support range nic */
+        d->first_tx_ring = NETMAP_GET_START_RINGID(nr_ringid & NETMAP_RING_MASK);
+        d->last_tx_ring  = NETMAP_GET_END_RINGID(nr_ringid & NETMAP_RING_MASK);
+        d->first_rx_ring = NETMAP_GET_START_RINGID(nr_ringid & NETMAP_RING_MASK);
+        d->last_rx_ring  = NETMAP_GET_END_RINGID(nr_ringid & NETMAP_RING_MASK);
 	} else { /* pipes */
 		d->first_tx_ring = d->last_tx_ring = 0;
 		d->first_rx_ring = d->last_rx_ring = 0;

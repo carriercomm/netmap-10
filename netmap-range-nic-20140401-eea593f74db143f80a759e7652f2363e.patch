@@ -1,0 +1,162 @@
+diff --git a/examples/GNUmakefile b/examples/GNUmakefile
+index 439846f..0b705ff 100644
+--- a/examples/GNUmakefile
++++ b/examples/GNUmakefile
+@@ -2,12 +2,13 @@
+ # we can just define 'progs' and create custom targets.
+ PROGS	=	pkt-gen bridge vale-ctl
+ #PROGS += pingd
+-PROGS	+= testlock test_select testmmap vale-ctl
++PROGS	+= testlock test_select testmmap vale-ctl testrangenic
+ LIBNETMAP =
+ 
+ CLEANFILES = $(PROGS) *.o
+ NO_MAN=
+-CFLAGS = -O2 -pipe
++#CFLAGS = -O2 -pipe
++CFLAGS = -g -pipe
+ CFLAGS += -Werror -Wall -Wunused-function
+ CFLAGS += -I ../sys # -I/home/luigi/FreeBSD/head/sys -I../sys
+ CFLAGS += -Wextra
+@@ -34,6 +35,8 @@ bridge: bridge.o
+ 
+ vale-ctl: vale-ctl.o
+ 
++testrangenic: testrangenic.o
++
+ %-pic.o: %.c
+ 	$(CC) $(CFLAGS) -fpic -c $^ -o $@
+ 
+diff --git a/examples/Makefile b/examples/Makefile
+index 8614074..a97cbf8 100644
+--- a/examples/Makefile
++++ b/examples/Makefile
+@@ -1,8 +1,8 @@
+ # For multiple programs using a single source file each,
+ # we can just define 'progs' and create custom targets.
+-PROGS	=	pkt-gen bridge vale-ctl
++PROGS	=	pkt-gen bridge vale-ctl 
+ #PROGS += pingd
+-PROGS	+= testlock test_select testmmap
++PROGS	+= testlock test_select testmmap testrangenic
+ MORE_PROGS = kern_test
+ 
+ CLEANFILES = $(PROGS) *.o
+@@ -34,6 +34,9 @@ bridge: bridge.o
+ vale-ctl: vale-ctl.o
+ 	$(CC) $(CFLAGS) -o vale-ctl vale-ctl.o
+ 
++testrangenic: testrangenic.o
++	$(CC) $(CFLAGS) -o testrangenic testrangenic.o
++
+ clean:
+ 	-@rm -rf $(CLEANFILES)
+ 
+diff --git a/sys/dev/netmap/netmap.c b/sys/dev/netmap/netmap.c
+index 22c5805..66e47ec 100644
+--- a/sys/dev/netmap/netmap.c
++++ b/sys/dev/netmap/netmap.c
+@@ -1498,6 +1498,27 @@ netmap_set_ringid(struct netmap_priv_d *priv, uint16_t ringid, uint32_t flags)
+ 		priv->np_rxqfirst = j;
+ 		priv->np_rxqlast = j + 1;
+ 		break;
++    case NR_REG_RANGE_NIC:
++        {
++            unsigned short start = NETMAP_GET_START_RINGID(i);
++            unsigned short end   = NETMAP_GET_END_RINGID(i);
++
++            if (start >= na->num_tx_rings 
++                    || start >= na->num_rx_rings 
++                    || end >= na->num_tx_rings 
++                    || end >= na->num_rx_rings)
++            {
++                D("invalid range ring id: (%d,%d)", start, end);
++                return EINVAL;
++            }
++
++            priv->np_txqfirst = start;
++            priv->np_txqlast = end + 1;
++
++            priv->np_rxqfirst = start;
++            priv->np_rxqlast = end + 1;
++        }
++        break;
+ 	default:
+ 		D("invalid regif type %d", reg);
+ 		return EINVAL;
+diff --git a/sys/net/netmap.h b/sys/net/netmap.h
+index ac36807..57b98b7 100644
+--- a/sys/net/netmap.h
++++ b/sys/net/netmap.h
+@@ -515,6 +515,23 @@ enum {	NR_REG_DEFAULT	= 0,	/* backward compat, should not be used. */
+ 	NR_REG_ONE_NIC	= 4,
+ 	NR_REG_PIPE_MASTER = 5,
+ 	NR_REG_PIPE_SLAVE = 6,
++
++    /* *
++     * suport range ring id 
++     * So, we split the 12-bits nr_ringid to two parts:
++     * the low 6-bits is start ring id,
++     * and the high 6-bits is end ring id(include).
++     *
++     * Use following macro to set/get start/end ring id,
++     * and build the nr_ringid
++     */
++#define RANGE_RINGID_MASK (0x003F)
++#define LOW_RINGID_MASK  (RANGE_RINGID_MASK)
++#define HIG_RINGID_MASK ( (RANGE_RINGID_MASK) << 6 )
++#define NETMAP_COMPOS_RINGID(start, end) ((( ((end) & RANGE_RINGID_MASK)<< 6) & HIG_RINGID_MASK) | ((start) & LOW_RINGID_MASK)) 
++#define NETMAP_GET_START_RINGID(ringid) ((ringid) & RANGE_RINGID_MASK) 
++#define NETMAP_GET_END_RINGID(ringid) (((ringid) >> 6) & RANGE_RINGID_MASK)
++    NR_REG_RANGE_NIC = 7,
+ };
+ /* monitor uses the NR_REG to select the rings to monitor */
+ #define NR_MONITOR_TX	0x100
+diff --git a/sys/net/netmap_user.h b/sys/net/netmap_user.h
+index 9c3a4c1..6a137c5 100644
+--- a/sys/net/netmap_user.h
++++ b/sys/net/netmap_user.h
+@@ -361,7 +361,7 @@ nm_open(const char *ifname, const struct nmreq *req,
+ 	if (ifname[0] == 'n')
+ 		ifname += 7;
+ 	/* scan for a separator */
+-	for (port = ifname; *port && !index("-*^{}", *port); port++)
++	for (port = ifname; *port && !index("-*^{}+", *port); port++)
+ 		;
+ 	namelen = port - ifname;
+ 	if (namelen >= sizeof(d->req.nr_name)) {
+@@ -376,6 +376,20 @@ nm_open(const char *ifname, const struct nmreq *req,
+ 		nr_flags = NR_REG_ONE_NIC;
+ 		nr_ringid = atoi(port + 1);
+ 		break;
++    case '+': /* range NIC */
++        nr_flags = NR_REG_RANGE_NIC;
++        {
++            const char *sp = strchr(port + 1, '.');
++            if (NULL == sp) {
++			    errmsg = "invalid port for range nic";
++			    goto fail;
++            }
++            unsigned short start = atoi(port + 1);
++            unsigned short end = atoi(sp + 1);
++
++            nr_ringid = NETMAP_COMPOS_RINGID(start, end);
++        }
++        break;
+ 	case '*': /* NIC and SW, ignore port */
+ 		nr_flags = NR_REG_NIC_SW;
+ 		if (port[1]) {
+@@ -508,7 +522,12 @@ nm_open(const char *ifname, const struct nmreq *req,
+ 	} else if (nr_flags == NR_REG_ONE_NIC) {
+ 		/* XXX check validity */
+ 		d->first_tx_ring = d->last_tx_ring =
+-		d->first_rx_ring = d->last_rx_ring = nr_ringid;
++		d->first_rx_ring = d->last_rx_ring = (nr_ringid & NETMAP_RING_MASK);
++    } else if (nr_flags == NR_REG_RANGE_NIC) { /* support range nic */
++        d->first_tx_ring = NETMAP_GET_START_RINGID(nr_ringid & NETMAP_RING_MASK);
++        d->last_tx_ring  = NETMAP_GET_END_RINGID(nr_ringid & NETMAP_RING_MASK);
++        d->first_rx_ring = NETMAP_GET_START_RINGID(nr_ringid & NETMAP_RING_MASK);
++        d->last_rx_ring  = NETMAP_GET_END_RINGID(nr_ringid & NETMAP_RING_MASK);
+ 	} else { /* pipes */
+ 		d->first_tx_ring = d->last_tx_ring = 0;
+ 		d->first_rx_ring = d->last_rx_ring = 0;

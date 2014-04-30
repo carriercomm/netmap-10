@@ -1,8 +1,8 @@
 # For multiple programs using a single source file each,
 # we can just define 'progs' and create custom targets.
-PROGS	=	pkt-gen bridge vale-ctl
+PROGS	=	pkt-gen bridge vale-ctl 
 #PROGS += pingd
-PROGS	+= testlock test_select testmmap
+PROGS	+= testlock test_select testmmap testrangenic
 MORE_PROGS = kern_test
 
 CLEANFILES = $(PROGS) *.o
@@ -33,6 +33,9 @@ bridge: bridge.o
 
 vale-ctl: vale-ctl.o
 	$(CC) $(CFLAGS) -o vale-ctl vale-ctl.o
+
+testrangenic: testrangenic.o
+	$(CC) $(CFLAGS) -o testrangenic testrangenic.o
 
 clean:
 	-@rm -rf $(CLEANFILES)
